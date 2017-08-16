@@ -1,0 +1,5 @@
+name = Test gcal
+description = test
+package = test
+core = 7.x
+files[] = test_gcal.module
