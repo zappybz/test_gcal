@@ -1,0 +1,5 @@
+name = Google Calendar Event Importer
+description = Uses Google Calendar API to import events from specified public calendars as nodes of a selected type. Requires google-api-php-client to be installed as a library.
+package = Date/Time
+core = 7.x
+files[] = gcal_importer.module
