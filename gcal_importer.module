@@ -28,37 +28,90 @@ function gcal_importer_page2() {
     
     $client = new Google_Client();
     $client->setApplicationName('nysim-calendar-test');
-    $client->setDeveloperKey('');
+    $client->setDeveloperKey('AIzaSyBEG7Eo9vY9cm-1ggUBoX-RanspfYdzGxk');
 
     $service = new Google_Service_Calendar($client);
 
     $out = '';
     $out .= '123';
     
-    $optParams = array(
-        'singleEvents' => 'true',
+    //$calendar_id = 'tjnv67uabdhnl0s9mb23i8dvhg@group.calendar.google.com';
+    $calendar_id = 'svg5r258e34u0gneoohvvekge8@group.calendar.google.com';
+    $sync_tokens = variable_get('gcal_importer_sync_tokens', array());
+    
+    $global_params = array(
+        //'singleEvents' => 'true',
         'showDeleted' => 'true',
+        //'timeZone' => 'GMT',
     );
+    
     $i = 0;
     try {
         while(true) {
-            
-                
-            $events = $service->events->listEvents('', $optParams);    
+            $opt_params = $global_params;
+            if (isset($sync_tokens[$calendar_id])) {
+                $opt_params['syncToken'] = $sync_tokens[$calendar_id];  
+            }
+            $events = $service->events->listEvents($calendar_id, $opt_params);    
             dsm($events);
+            
             foreach ($events->getItems() as $event) {
-                $out .= '<pre>' . print_r($event, true) .'</pre>';
+                
+                
+                $query = db_select('node', 'n');
+                $query->condition('n.gcal_sync_id', $event->getId());
+                $query->addField('n', 'nid');
+                $result = $query->execute();
+                
+                if ($nid = $result->fetchField()) {
+                    $node = node_load($nid);    
+                } else {
+                    $node = new stdClass();
+                    $node->gcal_sync_id = $event->getId();
+                    $node->type = 'event';
+                    node_object_prepare($node); 
+                    $node->language = LANGUAGE_NONE;
+                    $node->uid = 1;
+                    $node->promote = 0;
+                    $node->comment = 0;
+                }
+                
+                $node->title = $event->getSummary();
+                $node->status = ($event->getStatus() == 'confirmed') ? 1 : 0;
+ 
+                $start = $event->getStart();
+                $end = $event->getEnd();
+                $allday = !empty($start->date);
+                $date = !empty($start->date) ? $start->date : $start->dateTime;
+                $gcal_time = !empty($start->dateTime) ? $start->dateTime : '';
+                if ($allday) {
+                  $gcal_endtime = !empty($end->date) ? $end->date : '';
+                } else {
+                  $gcal_endtime = !empty($end->dateTime) ? $end->dateTime : '';
+                }
+                
+                $node->field_date[LANGUAGE_NONE][0] = array(
+                    'value' => format_date(strtotime($gcal_time), 'custom', 'Y-m-d H:i:s', 'GMT'),
+                    'value2' => format_date(strtotime($gcal_endtime), 'custom', 'Y-m-d H:i:s', 'GMT'),
+                    'timezone' => 'America/New_York',  
+                    'timezone_db' => 'America/New_York',
+                );
+                
+                $node = node_submit($node);
+                node_save($node);
+                                
+                drupal_set_message( "Node with nid " . $node->nid . " saved!\n");
+
                 $out .= $i++ . $event->getSummary() . '<br>';
+                $out .= '<pre>' . print_r($event, true) .'</pre>';
             }
 
-            
-
             if ($pageToken = $events->getNextPageToken()) {
-                $out .= '<h1>pt '. $pageToken . '</h1>';
-                $optParams['pageToken'] = $pageToken;
+                $opt_params['pageToken'] = $pageToken;
             } else {
-                if($syncToken = $events->getNextSyncToken()) {
-                    $out .= '<h3>stoken '. $syncToken . '</h3>';
+                if ($syncToken = $events->getNextSyncToken()) {
+                    $sync_tokens[$calendar_id] = $syncToken;
+                    variable_set('gcal_importer_sync_tokens', $sync_tokens);
                 }
                 break;
             }
@@ -74,117 +127,6 @@ function gcal_importer_page2() {
 
 function gcal_importer_views_pre_view(&$view) {
     //dsm($view);
-     if ($view->name == 'calendar') gcal_importer_page();
+     //if ($view->name == 'calendar') gcal_importer_page();
 }
 
-function gcal_importer_page() {
-    $account_name = 'nysim-calendar-test';
-    $query = db_select('node', 'n');
-    $query->innerJoin('field_data_field_event_id', 'eid', 'eid.entity_id = n.nid');
-    $query->fields('n', array('nid'))
-        ->fields('eid', array('field_event_id_value'))
-        ->condition('n.type', 'event');
-    
-    $existing = $query->execute()->fetchAllKeyed();
-    //dsm($existing);
-    
-    $cal = gcal_calendar_get('', $account_name);    
-    
-    // Including the google-api-php-client library (required).
-    $autoload_path = libraries_get_path('google-api-php-client') . '/vendor/autoload.php';
-    if (!file_exists($autoload_path)) {
-    drupal_set_message('GCal Events: The google-api-php-client library was not found.', 'error');
-        return;
-    }
-    include_once($autoload_path);
-
-    // https://developers.google.com/google-apps/calendar/v3/reference
-    $client = new Google_Client();
-    $client->setApplicationName('gcal_test');
-    $client->setDeveloperKey('');
-
-    $service = new Google_Service_Calendar($client);
-    
-    $optParams = array(
-        'orderBy' => 'startTime',
-        'singleEvents' => 'true',
-        'timeMin' => date('Y-m-d') . 'T00:00:00' . date('P'),
-        'timeZone' => 'EST',
-    );
-
-        //dsm(date_default_timezone_get());
-
-    try {
-        $events = $service->events->listEvents($cal->id, $optParams);
-        //dsm($events);
-        foreach ($events->getItems() as $event) {
-            $event_id = $event->getId();
-            $event = $service->events->get($cal->id, $event_id);
-//dsm($event->getTimeZone());
-//dsm($event);
-            $title = trim($event->getSummary());
-            $start = $event->getStart();
-            $end = $event->getEnd();
-            $allday = !empty($start->date);
-            $date = !empty($start->date) ? $start->date : $start->dateTime;
-            $gcal_time = !empty($start->dateTime) ? $start->dateTime : '';
-            if ($allday) {
-              $gcal_endtime = !empty($end->date) ? $end->date : '';
-            } else {
-              $gcal_endtime = !empty($end->dateTime) ? $end->dateTime : '';
-            }
-
-            //dsm($title);
-            //dsm($start);
-            //dsm($end);
-            
-            if(in_array($event_id, $existing)) {
-                $node = node_load(array_search($event_id, $existing));
-                $node->title = $title;
-                $node->field_date[LANGUAGE_NONE][0] = array(
-                    'value' => format_date(strtotime($gcal_time), 'custom', 'Y-m-d H:i:s', 'UTC'),
-                    'value2' => format_date(strtotime($gcal_endtime), 'custom', 'Y-m-d H:i:s', 'UTC'),
-                    'timezone' => date_default_timezone_get(),  
-                    'timezone_db' => date_default_timezone_get(),
-                );
-                //dsm($node);
-                node_save($node);
-                     
-            } else {
-                global $user;
-                $node = new stdClass();
-                $node->title = $title;
-                $node->type = 'event';
-
-                node_object_prepare($node); // Sets some defaults. Invokes hook_prepare() and hook_node_prepare().
-                $node->language = LANGUAGE_NONE; // Or e.g. 'en' if locale is enabled
-
-                $node->uid = $user->uid; 
-                $node->status = 1; //(1 or 0): published or not
-                $node->promote = 0; //(1 or 0): promoted to front page
-                $node->comment = 0; // 0 = comments disabled, 1 = read only, 2 = read/write
-                $node->field_date[LANGUAGE_NONE][0] = array(
-                    'value' => format_date(strtotime($gcal_time), 'custom', 'Y-m-d H:i:s', 'America/New_York'),
-                    'value2' => format_date(strtotime($gcal_endtime), 'custom', 'Y-m-d H:i:s', 'America/New_York'),
-                    'timezone' => 'America/New_York',  
-                    'timezone_db' => 'America/New_York',
-                );
-                $node->field_event_id[LANGUAGE_NONE][0] = array(
-                    'value' => $event_id
-                );
-                $node = node_submit($node); // Prepare node for saving
-                node_save($node);
-                //drupal_set_message( "Node with nid " . $node->nid . " saved!\n");
-            }
-                
-            
-        }
-          
-      }
-      catch (Exception $e) {
-        drupal_set_message(t('GCal Events: Bad call to list events'), 'error');
-        return;
-      }
-
-    return '';
-}

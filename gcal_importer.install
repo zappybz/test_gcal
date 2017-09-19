@@ -1,0 +1,30 @@
+<?php
+
+function gcal_importer_install() {
+  db_add_field(
+    'node',
+    'gcal_sync_id',
+    array(
+        'description' => 'An sync ID for imported Google Calendar events',
+        'type' => 'varchar',
+        'length' => 32,
+        'not null' => TRUE,
+        'default' => ''
+     )
+  );
+  dsm('gcalupd');
+}
+
+function gcal_importer_uninstall() {    
+    db_drop_field('node', 'gcal_sync_id');
+}
+
+function gcal_importer_schema_alter(&$schema) {
+    $schema['node']['fields']['gcal_sync_id'] = array(
+        'description' => 'An sync ID for imported Google Calendar events',
+        'type' => 'varchar',
+        'length' => 32,
+        'not null' => TRUE,
+        'default' => ''
+    );
+}
