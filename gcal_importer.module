@@ -11,7 +11,6 @@ function gcal_importer_menu() {
   );
   
   return $items;
-
 }
 
 
@@ -32,17 +31,14 @@ function gcal_importer_page2() {
 
     $service = new Google_Service_Calendar($client);
 
-    $out = '';
-    $out .= '123';
+    $out = ' ';
     
-    //$calendar_id = 'tjnv67uabdhnl0s9mb23i8dvhg@group.calendar.google.com';
-    $calendar_id = 'svg5r258e34u0gneoohvvekge8@group.calendar.google.com';
+    $calendar_id = 'tjnv67uabdhnl0s9mb23i8dvhg@group.calendar.google.com';
+    //$calendar_id = 'svg5r258e34u0gneoohvvekge8@group.calendar.google.com';
     $sync_tokens = variable_get('gcal_importer_sync_tokens', array());
     
     $global_params = array(
-        //'singleEvents' => 'true',
         'showDeleted' => 'true',
-        //'timeZone' => 'GMT',
     );
     
     $i = 0;
@@ -55,8 +51,10 @@ function gcal_importer_page2() {
             $events = $service->events->listEvents($calendar_id, $opt_params);    
             dsm($events);
             
-            foreach ($events->getItems() as $event) {
+            foreach ($events->getItems() as $event) { 
                 
+                $out .= $i++ . $event->getSummary() . '<br>';
+                $out .= '<pre>' . print_r($event, true) .'</pre>';
                 
                 $query = db_select('node', 'n');
                 $query->condition('n.gcal_sync_id', $event->getId());
@@ -64,7 +62,11 @@ function gcal_importer_page2() {
                 $result = $query->execute();
                 
                 if ($nid = $result->fetchField()) {
-                    $node = node_load($nid);    
+                    if ($event->getStatus() == 'cancelled') {
+                        node_delete($nid);
+                        continue;
+                    }           
+                    $node = node_load($nid);  
                 } else {
                     $node = new stdClass();
                     $node->gcal_sync_id = $event->getId();
@@ -74,36 +76,39 @@ function gcal_importer_page2() {
                     $node->uid = 1;
                     $node->promote = 0;
                     $node->comment = 0;
+                    $node->status = 1;
                 }
                 
                 $node->title = $event->getSummary();
-                $node->status = ($event->getStatus() == 'confirmed') ? 1 : 0;
+                
  
                 $start = $event->getStart();
                 $end = $event->getEnd();
                 $allday = !empty($start->date);
-                $date = !empty($start->date) ? $start->date : $start->dateTime;
-                $gcal_time = !empty($start->dateTime) ? $start->dateTime : '';
+      
                 if ($allday) {
-                  $gcal_endtime = !empty($end->date) ? $end->date : '';
+                  $start_time = !empty($start->date) ? strtotime($start->date) : false;
+                  $end_time = !empty($end->date) ? strtotime($end->date) : false;
                 } else {
-                  $gcal_endtime = !empty($end->dateTime) ? $end->dateTime : '';
+                  $start_time = !empty($start->dateTime) ? strtotime($start->dateTime) : false;
+                  $end_time = !empty($end->dateTime) ? strtotime($end->dateTime) : false;
                 }
                 
-                $node->field_date[LANGUAGE_NONE][0] = array(
-                    'value' => format_date(strtotime($gcal_time), 'custom', 'Y-m-d H:i:s', 'GMT'),
-                    'value2' => format_date(strtotime($gcal_endtime), 'custom', 'Y-m-d H:i:s', 'GMT'),
-                    'timezone' => 'America/New_York',  
-                    'timezone_db' => 'America/New_York',
-                );
+                if ($start_time) {
+                    $node->field_date[LANGUAGE_NONE][0] = array(
+                        'value' => format_date($start_time, 'custom', 'Y-m-d H:i:s', 'GMT'),
+                        'timezone' => 'America/New_York',  
+                        'timezone_db' => 'America/New_York',
+                    );
+                }
+                if ($end_time) $node->field_date[LANGUAGE_NONE][0]['value2'] = format_date($end_time, 'custom', 'Y-m-d H:i:s', 'GMT');
                 
                 $node = node_submit($node);
                 node_save($node);
                                 
                 drupal_set_message( "Node with nid " . $node->nid . " saved!\n");
 
-                $out .= $i++ . $event->getSummary() . '<br>';
-                $out .= '<pre>' . print_r($event, true) .'</pre>';
+                
             }
 
             if ($pageToken = $events->getNextPageToken()) {
@@ -126,7 +131,5 @@ function gcal_importer_page2() {
 }
 
 function gcal_importer_views_pre_view(&$view) {
-    //dsm($view);
      //if ($view->name == 'calendar') gcal_importer_page();
 }
-
